@@ -68,8 +68,10 @@ func run(bdmvRoot string, startEpisode int) error {
 
 	discInfo := ParseDiscTitle(discTitle)
 	fmt.Printf("Show:       %s\n", discInfo.ShowName)
-	fmt.Printf("Season:     %d\n", discInfo.Season)
-	fmt.Printf("Disc:       %d\n", discInfo.Disc)
+	if !discInfo.IsMovie {
+		fmt.Printf("Season:     %d\n", discInfo.Season)
+		fmt.Printf("Disc:       %d\n", discInfo.Disc)
+	}
 	if startEpisode > 0 {
 		fmt.Printf("Start Ep:   %d\n", startEpisode)
 	}
@@ -88,7 +90,15 @@ func run(bdmvRoot string, startEpisode int) error {
 		fmt.Println("No episodes found on disc")
 		return nil
 	}
-	fmt.Printf("Found %d episodes on disc\n\n", len(episodes))
+
+	// --- Detect movie vs TV ---
+	discInfo.DetectMovie(len(episodes))
+
+	if discInfo.IsMovie {
+		fmt.Printf("Detected: Movie\n\n")
+	} else {
+		fmt.Printf("Found %d episodes on disc\n\n", len(episodes))
+	}
 
 	// --- TMDB lookup ---
 	apiKey := os.Getenv(envTMDBAPIKey)
@@ -98,6 +108,50 @@ func run(bdmvRoot string, startEpisode int) error {
 
 	client := NewTMDBClient(apiKey)
 
+	if discInfo.IsMovie {
+		return runMovie(client, episodes, discInfo, bdmvRoot, clusterDur)
+	}
+	return runTV(client, episodes, discInfo, bdmvRoot, clusterDur, startEpisode)
+}
+
+func runMovie(
+	client *TMDBClient,
+	episodes []*Playlist,
+	discInfo DiscInfo,
+	bdmvRoot string,
+	clusterDur int,
+) error {
+	movies, err := client.SearchMovie(discInfo.ShowName)
+	if err != nil {
+		return fmt.Errorf("TMDB movie search: %w", err)
+	}
+	if len(movies) == 0 {
+		fmt.Printf("No TMDB movie results found for %q\n", discInfo.ShowName)
+		printMovieNoTMDB(episodes, bdmvRoot, clusterDur)
+		return nil
+	}
+
+	movie := movies[0]
+	details, err := client.GetMovie(movie.ID)
+	if err != nil {
+		return fmt.Errorf("TMDB movie details: %w", err)
+	}
+
+	fmt.Printf("TMDB Match: %s (ID: %d, Runtime: %d min)\n\n",
+		details.Title, movie.ID, details.Runtime)
+
+	printMovie(episodes[0], details, bdmvRoot, clusterDur)
+	return nil
+}
+
+func runTV(
+	client *TMDBClient,
+	episodes []*Playlist,
+	discInfo DiscInfo,
+	bdmvRoot string,
+	clusterDur int,
+	startEpisode int,
+) error {
 	shows, err := client.SearchTV(discInfo.ShowName)
 	if err != nil {
 		return fmt.Errorf("TMDB search: %w", err)
@@ -117,10 +171,45 @@ func run(bdmvRoot string, startEpisode int) error {
 	}
 
 	tmdbEps := EpisodesForDisc(season, startEpisode, len(episodes))
-
-	// --- Results ---
 	printEpisodes(episodes, tmdbEps, discInfo, bdmvRoot, clusterDur)
 	return nil
+}
+
+func printMovie(
+	pl *Playlist,
+	details *TMDBMovieDetails,
+	bdmvRoot string,
+	clusterDur int,
+) {
+	dur := pl.EstimateDuration(bdmvRoot)
+	count := pl.EstimateEpisodeCount(bdmvRoot, clusterDur)
+
+	fmt.Printf("%-10s %-12s %-12s %s\n", "Type", "Playlist", "Duration", "Title")
+	fmt.Println(strings.Repeat("-", 55))
+	fmt.Printf("%-10s %-12s %-12s %s\n",
+		"Movie",
+		pl.Name,
+		FormatDuration(dur/count),
+		details.Title,
+	)
+}
+
+func printMovieNoTMDB(
+	episodes []*Playlist,
+	bdmvRoot string,
+	clusterDur int,
+) {
+	fmt.Printf("%-10s %-12s %s\n", "Type", "Playlist", "Duration")
+	fmt.Println(strings.Repeat("-", 35))
+	for _, pl := range episodes {
+		dur := pl.EstimateDuration(bdmvRoot)
+		count := pl.EstimateEpisodeCount(bdmvRoot, clusterDur)
+		fmt.Printf("%-10s %-12s %s\n",
+			"Movie",
+			pl.Name,
+			FormatDuration(dur/count),
+		)
+	}
 }
 
 func printEpisodes(

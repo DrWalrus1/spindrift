@@ -31,10 +31,34 @@ type TMDBEpisode struct {
 	Overview      string `json:"overview"`
 }
 
+type TMDBMovie struct {
+	ID    int    `json:"id"`
+	Title string `json:"title"`
+}
+
+type TMDBMovieSearchResult struct {
+	Results []TMDBMovie `json:"results"`
+}
+
+type TMDBMovieDetails struct {
+	Title    string `json:"title"`
+	Runtime  int    `json:"runtime"`
+	Overview string `json:"overview"`
+}
+
 type DiscInfo struct {
 	ShowName string
 	Season   int
 	Disc     int
+	IsMovie  bool
+}
+
+// DetectMovie marks the disc as a movie if no season/disc markers
+// were found and only one title is present.
+func (d *DiscInfo) DetectMovie(episodeCount int) {
+	if d.Season == 1 && d.Disc == 1 && episodeCount == 1 {
+		d.IsMovie = true
+	}
 }
 
 func NewTMDBClient(apiKey string) *TMDBClient {
@@ -77,6 +101,34 @@ func (c *TMDBClient) GetSeason(showID, season int) (*TMDBSeason, error) {
 		return nil, err
 	}
 	return &s, nil
+}
+
+func (c *TMDBClient) SearchMovie(query string) ([]TMDBMovie, error) {
+	resp, err := c.get("/search/movie?query=" + url.QueryEscape(query))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var result TMDBMovieSearchResult
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return result.Results, nil
+}
+
+func (c *TMDBClient) GetMovie(movieID int) (*TMDBMovieDetails, error) {
+	resp, err := c.get(fmt.Sprintf("/movie/%d", movieID))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var m TMDBMovieDetails
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 func ParseDiscTitle(title string) DiscInfo {

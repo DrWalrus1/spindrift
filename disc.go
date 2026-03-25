@@ -112,7 +112,8 @@ func absFloat(f float64) float64 {
 }
 
 // removeMultiples filters out durations that are near-integer multiples
-// of smaller durations — these are likely "play all" or combined streams.
+// of smaller durations within the plausible episode count range —
+// these are likely "play all" or combined streams.
 func removeMultiples(durations []int) []int {
 	if len(durations) <= 1 {
 		return durations
@@ -127,9 +128,12 @@ func removeMultiples(durations []int) []int {
 			}
 			ratio := float64(d) / float64(smaller)
 			rounded := float64(int(ratio + 0.5))
-			if rounded < minMultiple {
+
+			// Only consider multiples within plausible episode count range
+			if rounded < minMultiple || rounded > float64(maxEpisodesPerStream) {
 				continue
 			}
+
 			// Relative tolerance: error as fraction of the multiple
 			if absFloat(ratio-rounded)/rounded < multipleDetectionTolerance {
 				isMultiple = true
