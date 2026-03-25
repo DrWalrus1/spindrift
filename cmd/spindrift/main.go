@@ -8,8 +8,8 @@ import (
 
 	"github.com/DrWalrus1/spindrift/bdmv"
 	"github.com/DrWalrus1/spindrift/disc"
-	"github.com/DrWalrus1/spindrift/env"
 	"github.com/DrWalrus1/spindrift/tmdb"
+	"github.com/joho/godotenv"
 )
 
 const envTMDBAPIKey = "TMDB_API_KEY"
@@ -380,7 +380,8 @@ func parseArgs() (discArg string, startEpisode int, robotMode bool) {
 }
 
 func main() {
-	if err := env.Load(".env"); err != nil {
+	err := godotenv.Load()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
 	}
 

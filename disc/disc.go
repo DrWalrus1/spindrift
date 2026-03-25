@@ -296,7 +296,7 @@ func DominantCluster(durations []int) (min, max, center int) {
 
 	bestStart, bestScore := 0, 0
 
-	for i := 0; i < len(durations); i++ {
+	for i := range durations {
 		totalDuration := 0
 		for j := i; j < len(durations); j++ {
 			ratio := float64(durations[j]) / float64(durations[i])
