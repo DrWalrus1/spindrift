@@ -16,6 +16,7 @@ type Episode struct {
 	EpisodeNumber int    `json:"episode_number"`
 	Name          string `json:"name"`
 	Overview      string `json:"overview"`
+	Runtime       int    `json:"runtime"`
 }
 
 // Movie represents a movie search result.

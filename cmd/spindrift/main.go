@@ -15,12 +15,13 @@ import (
 const envTMDBAPIKey = "TMDB_API_KEY"
 
 type trackResult struct {
-	Playlist string `json:"playlist"`
-	Clip     string `json:"clip,omitempty"`
-	Type     string `json:"type"`
-	Episode  string `json:"episode,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Duration string `json:"duration"`
+	Playlist     string `json:"playlist"`
+	Clip         string `json:"clip,omitempty"`
+	Type         string `json:"type"`
+	Episode      string `json:"episode,omitempty"`
+	Title        string `json:"title,omitempty"`
+	Duration     string `json:"duration"`
+	TMDBDuration string `json:"tmdb_duration,omitempty"`
 }
 
 func run(bdmvRoot string, startEpisode int, robotMode bool) error {
@@ -191,11 +192,12 @@ func printMovie(
 
 	if robotMode {
 		out := []trackResult{{
-			Playlist: pl.Name,
-			Clip:     pl.PrimaryClip(),
-			Type:     "movie",
-			Title:    details.Title,
-			Duration: bdmv.FormatDuration(dur / count),
+			Playlist:     pl.Name,
+			Clip:         pl.PrimaryClip(),
+			Type:         "movie",
+			Title:        details.Title,
+			Duration:     bdmv.FormatDuration(dur / count),
+			TMDBDuration: bdmv.FormatDuration(details.Runtime * 60),
 		}}
 		json.NewEncoder(os.Stdout).Encode(out)
 		return
@@ -270,6 +272,9 @@ func printEpisodes(
 				ep := tmdbEps[i]
 				r.Episode = fmt.Sprintf("S%02dE%02d", info.Season, ep.EpisodeNumber)
 				r.Title = ep.Name
+				if ep.Runtime > 0 {
+					r.TMDBDuration = bdmv.FormatDuration(ep.Runtime * 60)
+				}
 			}
 			out = append(out, r)
 		}
