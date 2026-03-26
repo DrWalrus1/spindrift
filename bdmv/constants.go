@@ -36,4 +36,16 @@ const (
 
 	// PTS clock rate for Blu-ray (45kHz)
 	PTSClock = 45000
+
+	// CLPI parsing
+	// TS_recording_rate is stored at a fixed offset within the pre-ClipInfo
+	// block that begins at 0x28 in all observed CLPI version 0200 files.
+	// The block has a 4-byte length field followed by 8 bytes of other data,
+	// placing TS_recording_rate at absolute file offset 0x34.
+	clpiTSRateOffset = 0x34
+
+	// Sanity bounds for TS_recording_rate (bytes/sec).
+	// Standard BD is typically ~4–7 MB/s; UHD BD up to ~15 MB/s.
+	clpiMinRate = 1_250_000  // 10 Mbps
+	clpiMaxRate = 50_000_000 // 400 Mbps
 )

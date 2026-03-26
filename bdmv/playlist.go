@@ -79,24 +79,90 @@ func (p *Playlist) StreamPath(bdmvRoot string) string {
 	return filepath.Join(bdmvRoot, "STREAM", clip+".m2ts")
 }
 
-// EstimateDuration estimates total stream duration from file size at
-// the standard Blu-ray bitrate.
-func (p *Playlist) EstimateDuration(bdmvRoot string, bitrate int) int {
-	path := p.StreamPath(bdmvRoot)
-	if path == "" {
-		return 0
-	}
+// clipDuration returns the estimated duration in seconds for a single clip,
+// using its CLPI recording rate when available and falling back to the
+// provided default bitrate (bytes/sec).
+func clipDuration(bdmvRoot, clipName string, defaultBitrate int) int {
+	path := filepath.Join(bdmvRoot, "STREAM", clipName+".m2ts")
 	info, err := os.Stat(path)
 	if err != nil {
 		return 0
 	}
-	return int(info.Size() * 8 / int64(bitrate))
+	rate := ClipBitrate(bdmvRoot, clipName)
+	if rate == 0 {
+		rate = defaultBitrate / 8 // convert bits/sec to bytes/sec
+	}
+	if rate == 0 {
+		return 0
+	}
+	return int(info.Size() / int64(rate))
+}
+
+// EstimateDuration estimates total stream duration by summing all unique clips
+// in the playlist. Each clip's bitrate is read from its .clpi file when
+// available, falling back to the provided default bitrate (bits/sec).
+// Summing all clips ensures multi-episode playlists spanning several .m2ts
+// files are measured correctly.
+func (p *Playlist) EstimateDuration(bdmvRoot string, defaultBitrate int) int {
+	seen := map[string]bool{}
+	total := 0
+	for _, item := range p.PlayItems {
+		if seen[item.ClipName] {
+			continue
+		}
+		seen[item.ClipName] = true
+		total += clipDuration(bdmvRoot, item.ClipName, defaultBitrate)
+	}
+	return total
+}
+
+// SubstantialClipCount returns the number of unique clips in the playlist
+// whose estimated duration meets or exceeds minDur seconds.
+func (p *Playlist) SubstantialClipCount(bdmvRoot string, defaultBitrate, minDur int) int {
+	seen := map[string]bool{}
+	count := 0
+	for _, item := range p.PlayItems {
+		if seen[item.ClipName] {
+			continue
+		}
+		seen[item.ClipName] = true
+		if clipDuration(bdmvRoot, item.ClipName, defaultBitrate) >= minDur {
+			count++
+		}
+	}
+	return count
 }
 
 // PTSDuration calculates duration in seconds from two PTS timestamps.
 // uint32 subtraction handles PTS wraparound at 0xFFFFFFFF naturally.
 func PTSDuration(in, out uint32) int {
 	return int((out - in) / PTSClock)
+}
+
+// ChapterDurations returns the duration in seconds between consecutive
+// entry marks (MarkType == 0) that share the same play item. Short gaps
+// under minSecs are excluded (recaps, previews, etc.).
+func (p *Playlist) ChapterDurations(minSecs int) []int {
+	var entry []PlaylistMark
+	for _, m := range p.Marks {
+		if m.MarkType == 0 {
+			entry = append(entry, m)
+		}
+	}
+	if len(entry) < 2 {
+		return nil
+	}
+	var durs []int
+	for i := 0; i < len(entry)-1; i++ {
+		if entry[i].PlayItemRef != entry[i+1].PlayItemRef {
+			continue
+		}
+		d := int((entry[i+1].Timestamp - entry[i].Timestamp) / PTSClock)
+		if d >= minSecs {
+			durs = append(durs, d)
+		}
+	}
+	return durs
 }
 
 // FormatDuration formats a duration in seconds as "M:SS".

@@ -17,11 +17,15 @@ type DiscInfo struct {
 	Season   int
 	Disc     int
 	IsMovie  bool
+	IsSeries bool // true when title contains series indicators (arc, set, disc-count)
 }
 
 // DetectMovie marks the disc as a movie if no season/disc markers
-// were found and only one title is present.
+// were found, only one title is present, and no series indicators were detected.
 func (d *DiscInfo) DetectMovie(episodeCount int) {
+	if d.IsSeries {
+		return
+	}
 	if d.Season == 1 && d.Disc == 1 && episodeCount == 1 {
 		d.IsMovie = true
 	}
@@ -86,8 +90,12 @@ func ParseDiscInfo(title string) DiscInfo {
 
 	lower := strings.ToLower(title)
 
+	// Disc number: "Disc 2" (space) or "Disc2" (digit immediately following).
 	if i := strings.Index(lower, "disc "); i >= 0 {
 		fmt.Sscanf(strings.TrimSpace(title[i+5:]), "%d", &info.Disc)
+	} else if i := indexDiscDigit(lower); i >= 0 {
+		fmt.Sscanf(lower[i+4:], "%d", &info.Disc)
+		info.IsSeries = true // "Disc1" style implies a numbered disc in a set
 	}
 
 	bookWords := map[string]int{
@@ -106,7 +114,21 @@ func ParseDiscInfo(title string) DiscInfo {
 		fmt.Sscanf(strings.TrimSpace(title[i+7:]), "%d", &info.Season)
 	}
 
-	for _, marker := range []string{"Book ", "Season ", "Disc "} {
+	// Series indicators: keywords that signal a TV series rather than a standalone movie.
+	for _, kw := range []string{" arc", " set"} {
+		if strings.Contains(lower, kw) {
+			info.IsSeries = true
+			break
+		}
+	}
+
+	// Show name: everything before the first structural marker.
+	// Include "Disc\d" as a marker so it is stripped from the name.
+	markers := []string{"Book ", "Season ", "Disc "}
+	if di := indexDiscDigit(title); di > 0 {
+		markers = append(markers, title[di:di+5]) // e.g. "Disc1"
+	}
+	for _, marker := range markers {
 		if i := strings.Index(title, marker); i > 0 {
 			info.ShowName = strings.TrimSpace(title[:i])
 			break
@@ -117,6 +139,18 @@ func ParseDiscInfo(title string) DiscInfo {
 	}
 
 	return info
+}
+
+// indexDiscDigit returns the index of the first "disc\d" sequence (disc immediately
+// followed by a digit, e.g. "Disc1"), or -1 if not found.
+func indexDiscDigit(s string) int {
+	lower := strings.ToLower(s)
+	for i := 0; i+5 <= len(lower); i++ {
+		if lower[i:i+4] == "disc" && lower[i+4] >= '0' && lower[i+4] <= '9' {
+			return i
+		}
+	}
+	return -1
 }
 
 // FindBDMVRoots searches mounted volumes for BDMV directories.
@@ -338,9 +372,16 @@ func InferEpisodeBounds(bdmvRoot string) (minDur, maxDur, clusterDur int) {
 	return DominantCluster(durations)
 }
 
-// EstimateEpisodeCount checks if the stream duration is a near-integer
-// multiple of the cluster episode duration.
+// EstimateEpisodeCount checks how many episodes a playlist contains.
+// It first checks whether the playlist spans multiple substantial clips
+// (each clip = one episode), then falls back to comparing the total
+// duration against the dominant cluster duration.
 func EstimateEpisodeCount(pl *bdmv.Playlist, bdmvRoot string, clusterDur int) int {
+	// If the playlist contains N substantial clips, each is one episode.
+	if n := pl.SubstantialClipCount(bdmvRoot, DefaultBitrate, MinClusterDuration); n > 1 {
+		return n
+	}
+
 	if clusterDur <= 0 {
 		return 1
 	}
@@ -362,6 +403,35 @@ func EstimateEpisodeCount(pl *bdmv.Playlist, bdmvRoot string, clusterDur int) in
 	}
 
 	return rounded
+}
+
+// ChapterEpisodeCount infers the number of episodes from chapter marks
+// when all episodes share a single playlist. Returns 0 if the chapter
+// structure does not look like TV episodes.
+func ChapterEpisodeCount(pl *bdmv.Playlist) int {
+	durs := pl.ChapterDurations(MinEpisodeDuration)
+	if len(durs) < 2 {
+		return 0
+	}
+
+	_, _, center := DominantCluster(durs)
+	if center < MinEpisodeDuration || center > MaxEpisodeDuration {
+		return 0
+	}
+
+	// Count chapters that fall within the cluster bounds.
+	lo := int(float64(center) * ClusterLowerBound)
+	hi := int(float64(center) * ClusterUpperBound)
+	count := 0
+	for _, d := range durs {
+		if d >= lo && d <= hi {
+			count++
+		}
+	}
+	if count < 2 {
+		return 0
+	}
+	return count
 }
 
 // LoadEpisodePlaylists loads playlists filtered to likely episode content,
@@ -387,10 +457,24 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 		}
 
 		episodeCount := EstimateEpisodeCount(pl, bdmvRoot, clusterDur)
+
+		// If the stream-level estimate gives 1, check whether the
+		// chapter marks reveal multiple episodes in a single playlist.
+		if episodeCount == 1 {
+			if n := ChapterEpisodeCount(pl); n > 1 {
+				episodeCount = n
+			}
+		}
+
 		perEpisodeDur := dur / episodeCount
 
 		if perEpisodeDur < minDur || perEpisodeDur > maxDur {
-			continue
+			// For chapter-detected episodes the per-episode duration
+			// from file size may be unreliable; trust the chapter
+			// analysis if it fired and skip the filter.
+			if episodeCount <= 1 {
+				continue
+			}
 		}
 
 		seen[clip] = true
