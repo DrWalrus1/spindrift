@@ -442,6 +442,13 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 		return nil, err
 	}
 
+	// Process individual-episode playlists (fewer clips) before "play all"
+	// playlists (more clips) so that the seen-clip deduplication below
+	// skips the play-all rather than the individual episodes.
+	sort.SliceStable(all, func(i, j int) bool {
+		return len(all[i].PlayItems) < len(all[j].PlayItems)
+	})
+
 	var episodes []*bdmv.Playlist
 	seen := map[string]bool{}
 
