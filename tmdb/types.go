@@ -13,6 +13,7 @@ type Season struct {
 
 // Episode represents a single TV episode.
 type Episode struct {
+	ID            int    `json:"id"`
 	EpisodeNumber int    `json:"episode_number"`
 	Name          string `json:"name"`
 	Overview      string `json:"overview"`
