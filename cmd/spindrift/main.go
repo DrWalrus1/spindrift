@@ -121,9 +121,22 @@ func runMovie(
 	clusterDur int,
 	robotMode bool,
 ) error {
-	movies, err := client.SearchMovie(info.ShowName)
-	if err != nil {
-		return fmt.Errorf("TMDB movie search: %w", err)
+	var movies []tmdb.Movie
+	for query := info.ShowName; ; query = dropLastWord(query) {
+		if query == "" {
+			break
+		}
+		var err error
+		movies, err = client.SearchMovie(query)
+		if err != nil {
+			return fmt.Errorf("TMDB movie search: %w", err)
+		}
+		if len(movies) > 0 {
+			if !robotMode && query != info.ShowName {
+				fmt.Printf("No results for full title; matched using %q\n", query)
+			}
+			break
+		}
 	}
 	if len(movies) == 0 {
 		if !robotMode {
@@ -157,9 +170,22 @@ func runTV(
 	startEpisode int,
 	robotMode bool,
 ) error {
-	shows, err := client.SearchTV(info.ShowName)
-	if err != nil {
-		return fmt.Errorf("TMDB search: %w", err)
+	var shows []tmdb.Show
+	for query := info.ShowName; ; query = dropLastWord(query) {
+		if query == "" {
+			break
+		}
+		var err error
+		shows, err = client.SearchTV(query)
+		if err != nil {
+			return fmt.Errorf("TMDB search: %w", err)
+		}
+		if len(shows) > 0 {
+			if !robotMode && query != info.ShowName {
+				fmt.Printf("No results for full title; matched using %q\n", query)
+			}
+			break
+		}
 	}
 	if len(shows) == 0 {
 		if !robotMode {
@@ -387,6 +413,17 @@ func printEpisodesNoTMDB(
 			pl.ChapterCount(),
 		)
 	}
+}
+
+// dropLastWord removes the last whitespace-delimited word from s.
+// Returns an empty string when no words remain.
+func dropLastWord(s string) string {
+	s = strings.TrimSpace(s)
+	i := strings.LastIndex(s, " ")
+	if i < 0 {
+		return ""
+	}
+	return s[:i]
 }
 
 func parseArgs() (discArg string, startEpisode int, robotMode bool) {
