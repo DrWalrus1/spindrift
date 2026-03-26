@@ -482,9 +482,11 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 		if episodeCount > 1 {
 			for i := range episodeCount {
 				episodes = append(episodes, &bdmv.Playlist{
-					Name:      fmt.Sprintf("%s[%d]", pl.Name, i+1),
-					PlayItems: pl.PlayItems,
-					Marks:     pl.Marks,
+					Name:         fmt.Sprintf("%s[%d]", pl.Name, i+1),
+					PlayItems:    pl.PlayItems,
+					Marks:        pl.Marks,
+					EpisodeCount: episodeCount,
+					EpisodeIndex: i + 1,
 				})
 			}
 		} else {

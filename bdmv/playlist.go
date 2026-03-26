@@ -12,9 +12,31 @@ import (
 
 // Playlist represents a parsed .mpls playlist file.
 type Playlist struct {
-	Name      string
-	PlayItems []PlayItem
-	Marks     []PlaylistMark
+	Name         string
+	PlayItems    []PlayItem
+	Marks        []PlaylistMark
+	EpisodeCount int // >1 when this playlist is shared by multiple episodes
+	EpisodeIndex int // 1-based position within EpisodeCount
+}
+
+// ChapterCount returns the total number of marks in this playlist assigned
+// to this episode. When EpisodeCount > 1, the total is divided as evenly
+// as possible across all episodes, with any remainder given to the last ones.
+func (p *Playlist) ChapterCount() int {
+	total := len(p.Marks)
+
+	n := p.EpisodeCount
+	if n <= 1 {
+		return total
+	}
+
+	base := total / n
+	remainder := total % n
+	// Last `remainder` episodes get an extra chapter.
+	if p.EpisodeIndex > n-remainder {
+		return base + 1
+	}
+	return base
 }
 
 // PlayItem represents a single play item within a playlist.
@@ -246,18 +268,17 @@ func parsePlaylistMarks(f *os.File, markOffset uint32) ([]PlaylistMark, error) {
 	var numMarks uint16
 	binary.Read(f, binary.BigEndian, &numMarks)
 
+	// Each mark is 13 bytes: mark_type(1) + play_item_ref(2) + timestamp(4) + es_pid(2) + duration(4)
 	marks := make([]PlaylistMark, numMarks)
 	for i := range marks {
 		var markType uint8
 		var playItemRef uint16
-		var reserved uint16
 		var ts uint32
 		var esPid uint16
 		var dur uint32
 
 		binary.Read(f, binary.BigEndian, &markType)
 		binary.Read(f, binary.BigEndian, &playItemRef)
-		binary.Read(f, binary.BigEndian, &reserved)
 		binary.Read(f, binary.BigEndian, &ts)
 		binary.Read(f, binary.BigEndian, &esPid)
 		binary.Read(f, binary.BigEndian, &dur)
