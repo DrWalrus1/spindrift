@@ -72,6 +72,44 @@ type MovieDetails struct {
 	Overview string `json:"overview"`
 }
 
+// MatchStartEpisode finds the 1-based episode number where this disc begins by
+// comparing disc episode durations (in seconds) against TMDB runtimes. It
+// slides a window of len(discDurations) across the season and picks the
+// position with the lowest total absolute error. Returns 1 if the season has
+// no usable runtime data or fewer episodes than the disc.
+func MatchStartEpisode(season *Season, discDurations []int) int {
+	n := len(discDurations)
+	if n == 0 || len(season.Episodes) < n {
+		return 1
+	}
+
+	bestScore := int(^uint(0) >> 1) // max int
+	bestStart := 1
+
+	for i := 0; i <= len(season.Episodes)-n; i++ {
+		score := 0
+		valid := true
+		for j := 0; j < n; j++ {
+			tmdbSecs := season.Episodes[i+j].Runtime * 60
+			if tmdbSecs == 0 {
+				valid = false
+				break
+			}
+			diff := discDurations[j] - tmdbSecs
+			if diff < 0 {
+				diff = -diff
+			}
+			score += diff
+		}
+		if valid && score < bestScore {
+			bestScore = score
+			bestStart = season.Episodes[i].EpisodeNumber
+		}
+	}
+
+	return bestStart
+}
+
 // EpisodesForDisc returns the slice of episodes starting at
 // startEpisode (1-indexed). If startEpisode is 0, starts from episode 1.
 func EpisodesForDisc(season *Season, startEpisode, numEpisodes int) []Episode {

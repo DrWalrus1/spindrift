@@ -442,25 +442,34 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 		return nil, err
 	}
 
-	// Process individual-episode playlists (fewer clips) before "play all"
-	// playlists (more clips) so that the seen-clip deduplication below
-	// skips the play-all rather than the individual episodes.
+	// Sort by episode content duration DESCENDING so that more-complete
+	// variants of an episode (e.g. with opening credits) are processed
+	// before stripped versions. Use play-item count ASCENDING as a
+	// tiebreaker so that simpler playlists win when durations are equal
+	// (avoids preferring commentary over main episode when both measure
+	// the same duration via file-size estimation).
 	sort.SliceStable(all, func(i, j int) bool {
-		return len(all[i].PlayItems) < len(all[j].PlayItems)
+		di := all[i].EstimateDuration(bdmvRoot, DefaultBitrate)
+		dj := all[j].EstimateDuration(bdmvRoot, DefaultBitrate)
+		if di != dj {
+			return di > dj // longer first
+		}
+		return len(all[i].PlayItems) < len(all[j].PlayItems) // simpler first on tie
 	})
 
 	var episodes []*bdmv.Playlist
 	seen := map[string]bool{}
+	seenCommentary := map[string]bool{} // deduplicate commentary per episode clip
 
-	for _, pl := range all {
+	processPlaylist := func(pl *bdmv.Playlist) {
 		clip := pl.PrimaryClip()
-		if clip == "" || seen[clip] {
-			continue
+		if clip == "" {
+			return
 		}
 
 		dur := pl.EstimateDuration(bdmvRoot, DefaultBitrate)
 		if dur < MinViableDuration {
-			continue
+			return
 		}
 
 		episodeCount := EstimateEpisodeCount(pl, bdmvRoot, clusterDur)
@@ -480,26 +489,45 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 			// from file size may be unreliable; trust the chapter
 			// analysis if it fired and skip the filter.
 			if episodeCount <= 1 {
-				continue
+				return
 			}
+		}
+
+		if seen[clip] {
+			// Primary clip already claimed by a longer/preferred variant.
+			// Detect commentary: single-episode playlist where all non-primary
+			// items are short overlay clips (Duration < 60s after timestamp fix).
+			if episodeCount == 1 && len(pl.PlayItems) > 1 && dur >= minDur && dur <= maxDur {
+				allShort := true
+				for _, item := range pl.PlayItems {
+					if item.ClipName != clip && item.Duration >= 60 {
+						allShort = false
+						break
+					}
+				}
+				if allShort && !seenCommentary[clip] {
+					seenCommentary[clip] = true
+					pl.Note = "commentary"
+					pl.NoteClip = clip
+					episodes = append(episodes, pl)
+				}
+			}
+			return
 		}
 
 		seen[clip] = true
 
-		// Detect commentary: a non-primary clip in this playlist is already
-		// a known episode clip, meaning this playlist overlays commentary
-		// audio on top of a main episode's video stream.
-		note := ""
-		noteClip := ""
-		for _, item := range pl.PlayItems {
-			if item.ClipName != clip && seen[item.ClipName] {
-				note = "commentary"
-				noteClip = item.ClipName
-				break
-			}
-		}
-
 		if episodeCount > 1 {
+			// Skip play-all if every episode it contains is already covered.
+			coveredCount := 0
+			for _, item := range pl.PlayItems {
+				if item.ClipName != clip && seen[item.ClipName] {
+					coveredCount++
+				}
+			}
+			if coveredCount >= episodeCount {
+				return
+			}
 			for i := range episodeCount {
 				episodes = append(episodes, &bdmv.Playlist{
 					Name:         fmt.Sprintf("%s[%d]", pl.Name, i+1),
@@ -507,16 +535,36 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 					Marks:        pl.Marks,
 					EpisodeCount: episodeCount,
 					EpisodeIndex: i + 1,
-					Note:         note,
-					NoteClip:     noteClip,
 				})
 			}
 		} else {
-			pl.Note = note
-			pl.NoteClip = noteClip
 			episodes = append(episodes, pl)
 		}
 	}
+
+	// First pass: single-episode playlists (sorted by duration DESC above).
+	// These are processed before multi-episode playlists so that individual
+	// episode variants are preferred over play-all compilations.
+	for _, pl := range all {
+		if EstimateEpisodeCount(pl, bdmvRoot, clusterDur) == 1 {
+			processPlaylist(pl)
+		}
+	}
+
+	// Second pass: multi-episode playlists. These handle discs (e.g. Demon
+	// Slayer) where all episodes are packed into a single multi-clip stream
+	// with no separate per-episode playlists.
+	for _, pl := range all {
+		if EstimateEpisodeCount(pl, bdmvRoot, clusterDur) > 1 {
+			processPlaylist(pl)
+		}
+	}
+
+	// Re-sort by playlist name so episodes appear in disc order regardless
+	// of which variant was chosen during duration-based deduplication.
+	sort.SliceStable(episodes, func(i, j int) bool {
+		return episodes[i].Name < episodes[j].Name
+	})
 
 	return episodes, nil
 }

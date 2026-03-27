@@ -32,7 +32,11 @@ const (
 	playlistHeaderSkip     = 4 + 2 // length(4) + reserved(2)
 	playItemClipNameLen    = 9
 	playItemClipNameUsed   = 5 // just the number part e.g. "01061"
-	playItemTimestampSkip  = 4 // reserved(1) + connection(1) + stc_id(1) + reserved(1)
+	// After the 9-byte clip name + codec read, the PlayItem structure has:
+	//   2 bytes: is_multi_angle + connection_condition flags
+	//   1 byte:  ref_to_stc_id
+	// before the 4-byte IN_time field.
+	playItemTimestampSkip = 3
 
 	// PTS clock rate for Blu-ray (45kHz)
 	PTSClock = 45000

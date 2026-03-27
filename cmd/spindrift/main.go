@@ -189,10 +189,41 @@ func runTV(
 		fmt.Printf("Season matched by name: %d\n", seasonNum)
 	}
 
+	// Auto-detect which episode this disc starts at when not explicitly given.
+	if startEpisode == 0 {
+		mainDurations := mainEpisodeDurations(episodes, bdmvRoot, clusterDur)
+		startEpisode = tmdb.MatchStartEpisode(season, mainDurations)
+		if !robotMode && startEpisode > 1 {
+			fmt.Printf("Auto-detected start episode: %d\n\n", startEpisode)
+		}
+	}
+
 	tmdbEps := tmdb.EpisodesForDisc(season, startEpisode, len(episodes))
 	info.Season = seasonNum
 	printEpisodes(episodes, tmdbEps, info, show.ID, bdmvRoot, clusterDur, robotMode)
 	return nil
+}
+
+// mainEpisodeDurations returns PTS-based durations (seconds) for non-commentary
+// episodes, used to auto-detect the start episode from TMDB runtimes.
+// EpisodeDuration sums only substantial clips (>= 60s) so intro bumpers are
+// excluded, giving a duration that closely matches TMDB's runtime figures.
+func mainEpisodeDurations(episodes []*bdmv.Playlist, bdmvRoot string, clusterDur int) []int {
+	var out []int
+	for _, pl := range episodes {
+		if pl.Note != "" {
+			continue
+		}
+		dur := pl.EpisodeDuration()
+		count := disc.EstimateEpisodeCount(pl, bdmvRoot, clusterDur)
+		if count > 1 && count > 0 {
+			dur = dur / count
+		}
+		if dur > 0 {
+			out = append(out, dur)
+		}
+	}
+	return out
 }
 
 func printMovie(
