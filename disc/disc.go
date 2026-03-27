@@ -444,17 +444,18 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 
 	// Sort by episode content duration DESCENDING so that more-complete
 	// variants of an episode (e.g. with opening credits) are processed
-	// before stripped versions. Use play-item count ASCENDING as a
-	// tiebreaker so that simpler playlists win when durations are equal
-	// (avoids preferring commentary over main episode when both measure
-	// the same duration via file-size estimation).
+	// before stripped versions. Use play-item count DESCENDING as a
+	// tiebreaker: when file-size durations are identical (e.g. intro
+	// bumper adds negligible bytes), prefer the playlist with more items
+	// because that is the variant with intro/credits rather than the raw
+	// single-clip version.
 	sort.SliceStable(all, func(i, j int) bool {
 		di := all[i].EstimateDuration(bdmvRoot, DefaultBitrate)
 		dj := all[j].EstimateDuration(bdmvRoot, DefaultBitrate)
 		if di != dj {
 			return di > dj // longer first
 		}
-		return len(all[i].PlayItems) < len(all[j].PlayItems) // simpler first on tie
+		return len(all[i].PlayItems) > len(all[j].PlayItems) // more items first on tie
 	})
 
 	var episodes []*bdmv.Playlist
@@ -495,21 +496,29 @@ func LoadEpisodePlaylists(bdmvRoot string, minDur, maxDur, clusterDur int) ([]*b
 
 		if seen[clip] {
 			// Primary clip already claimed by a longer/preferred variant.
-			// Detect commentary: single-episode playlist where all non-primary
-			// items are short overlay clips (Duration < 60s after timestamp fix).
+			// Detect commentary: single-episode playlist where:
+			//   - all non-primary items are short overlay clips (< 60s), AND
+			//   - the primary clip is the FIRST playlist item (or at least not
+			//     the last), meaning the short clips follow rather than precede
+			//     it.  Intro/credits variants have [short_bumper, MAIN] so the
+			//     primary is last — those are duplicates, not commentary.
 			if episodeCount == 1 && len(pl.PlayItems) > 1 && dur >= minDur && dur <= maxDur {
-				allShort := true
-				for _, item := range pl.PlayItems {
-					if item.ClipName != clip && item.Duration >= 60 {
-						allShort = false
-						break
+				lastItem := pl.PlayItems[len(pl.PlayItems)-1]
+				primaryIsLast := lastItem.ClipName == clip
+				if !primaryIsLast {
+					allShort := true
+					for _, item := range pl.PlayItems {
+						if item.ClipName != clip && item.Duration >= 60 {
+							allShort = false
+							break
+						}
 					}
-				}
-				if allShort && !seenCommentary[clip] {
-					seenCommentary[clip] = true
-					pl.Note = "commentary"
-					pl.NoteClip = clip
-					episodes = append(episodes, pl)
+					if allShort && !seenCommentary[clip] {
+						seenCommentary[clip] = true
+						pl.Note = "commentary"
+						pl.NoteClip = clip
+						episodes = append(episodes, pl)
+					}
 				}
 			}
 			return
