@@ -265,6 +265,34 @@ When loading playlists, Spindrift tracks which video clips have already been ass
 
 If the disc title contains no season or disc markers and only one episode-length stream is found, the disc is treated as a movie and looked up via TMDB's movie API instead of the TV API.
 
+## Test Volumes
+
+The `test_volumes/` directory holds lightweight disc snapshots used for development and testing. Each volume contains the real BDMV metadata (playlists, clip info, disc title XML) but no actual video — stream files are replaced with sparse stubs that match the originals in size.
+
+### Creating a test volume
+
+Insert a disc and run:
+```bash
+./mktestvol.sh                          # auto-detect all mounted discs
+./mktestvol.sh /Volumes/MyDisc          # explicit path
+```
+
+The script copies all metadata, creates sparse `.m2ts` stubs, bundles everything except the stubs into `metadata.tar`, and ejects the disc when done.
+
+### What gets committed to git
+
+Git does not preserve sparse files — committing a 50 GB stub would store 50 GB of zeros. To avoid this, `BDMV/` is gitignored entirely. Only one file per volume is committed:
+
+- `metadata.tar` — contains `BDMV/PLAYLIST/`, `BDMV/CLIPINF/`, `BDMV/*.bdmv`, `BDMV/META/` (if present), and `BDMV/STREAM/sizes.txt` (a `filename size` manifest used to regenerate stubs)
+
+### Restoring a volume after a fresh clone
+
+After cloning, recreate `BDMV/` and the stream stubs from the committed tar:
+```bash
+./mktestvol.sh --restore                # restore all volumes in test_volumes/
+./mktestvol.sh --restore MyDisc         # restore a specific volume by name
+```
+
 ## Known Limitations
 
 - **Duration estimates** are based on file size and assume a fixed bitrate. Actual durations may differ by a few minutes. Encrypted streams prevent direct PTS timestamp parsing.

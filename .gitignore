@@ -1,2 +1,6 @@
 .env
 spindrift
+
+# Test volume BDMV dirs are gitignored; only metadata.tar is committed.
+# Run ./mktestvol.sh --restore to recreate BDMV/ from the tar.
+test_volumes/*/BDMV/
